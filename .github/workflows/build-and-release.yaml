@@ -11,14 +11,11 @@ permissions:
   statuses: write
   issues: write
 
-
-
 jobs:
   build-multi-platform:
     name: Build for all platforms
     outputs:
       new_tag: ${{ steps.get_version.outputs.new_tag }}
-      changelog: ${{ steps.get_version.outputs.changelog }}
     timeout-minutes: 25
     runs-on: ubuntu-latest
     strategy:
@@ -34,21 +31,27 @@ jobs:
             target: darwin
             artifact_name: darwin
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Setup Go
-        uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5
+        uses: actions/setup-go@v5
         with:
           go-version-file: "go.mod"
 
       - name: Get version
         id: get_version
-        uses: mathieudutour/github-tag-action@a22cf08638b3a5badda920f9daf6e72c477b07b # v6.2
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          dry_run: true
+        run: |
+          # Get latest tag or use dev
+          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          # Increment patch version
+          IFS='.' read -r major minor patch <<< "${TAG#v}"
+          NEW_PATCH=$((patch + 1))
+          NEW_TAG="v${major}.${minor}.${NEW_PATCH}"
+          echo "new_tag=${NEW_TAG}" >> $GITHUB_OUTPUT
+          echo "Previous tag: ${TAG}"
+          echo "New tag: ${NEW_TAG}"
 
       - name: Build for ${{ matrix.target }}
         shell: bash
@@ -94,7 +97,7 @@ jobs:
           ls -lh "$OUTPUT_NAME" "$ARCHIVE_NAME"
 
       - name: Upload ${{ matrix.target }} artifact
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4
+        uses: actions/upload-artifact@v4
         with:
           name: gollama-${{ matrix.target }}
           path: |
@@ -105,18 +108,17 @@ jobs:
   build-windows-enhanced:
     name: Build Windows Enhanced
     needs: build-multi-platform
-    if: ${{ startsWith(github.ref, 'refs/heads/main') && !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: actions/checkout@v4
 
       - name: Setup Go
-        uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5
+        uses: actions/setup-go@v5
         with:
           go-version-file: "go.mod"
 
       - name: Download Windows artifact
-        uses: actions/download-artifact@6b208ae046db98c579e8a3aa621ab581ff575935 # v4
+        uses: actions/download-artifact@v4
         with:
           name: gollama-windows
           path: downloaded/
@@ -214,7 +216,7 @@ jobs:
           echo "SHA256: $($Hash.Hash.ToLower())"
 
       - name: Upload Windows enhanced package
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4
+        uses: actions/upload-artifact@v4
         with:
           name: gollama-windows-enhanced
           path: |
@@ -227,29 +229,28 @@ jobs:
     needs:
       - build-multi-platform
       - build-windows-enhanced
-    if: ${{ startsWith(github.ref, 'refs/heads/main') && !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ubuntu-latest
     steps:
       - name: Download Linux artifact
-        uses: actions/download-artifact@6b208ae046db98c579e8a3aa621ab581ff575935 # v4
+        uses: actions/download-artifact@v4
         with:
           name: gollama-linux
           path: artifacts/
 
       - name: Download Windows artifact
-        uses: actions/download-artifact@6b208ae046db98c579e8a3aa621ab581ff575935 # v4
+        uses: actions/download-artifact@v4
         with:
           name: gollama-windows
           path: artifacts/
 
       - name: Download macOS artifact
-        uses: actions/download-artifact@6b208ae046db98c579e8a3aa621ab581ff575935 # v4
+        uses: actions/download-artifact@v4
         with:
           name: gollama-darwin
           path: artifacts/
 
       - name: Download Windows enhanced package
-        uses: actions/download-artifact@6b208ae046db98c579e8a3aa621ab581ff575935 # v4
+        uses: actions/download-artifact@v4
         with:
           name: gollama-windows-enhanced
           path: artifacts/
@@ -272,14 +273,15 @@ jobs:
           cat SHA256SUMS.txt
 
       - name: Create GitHub release
-        uses: ncipollo/release-action@2c591bcc8ecdcd2db72b97d6147f871fcd833ba5 # v1
+        uses: actions/create-release@v1
+        id: create_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag: ${{ needs.build-multi-platform.outputs.new_tag }}
-          name: Release ${{ needs.build-multi-platform.outputs.new_tag }}
+          tag_name: ${{ needs.build-multi-platform.outputs.new_tag }}
+          release_name: Release ${{ needs.build-multi-platform.outputs.new_tag }}
           body: |
             # Release ${{ needs.build-multi-platform.outputs.new_tag }}
-
-            ${{ needs.build-multi-platform.outputs.changelog }}
 
             ## Downloads
 
@@ -323,25 +325,18 @@ jobs:
             ---
 
             *Automated build from commit: ${{ github.sha }}*
-          allowUpdates: true
-          makeLatest: true
-          prerelease: false
           draft: false
-          artifactErrorsFailBuild: true
-          artifacts: |
-            release-assets/*
+          prerelease: false
+
+      - name: Upload release assets
+        uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Bump version and push tag
-        id: tag_version
-        uses: mathieudutour/github-tag-action@a22cf08638b34d5badda920f9daf6e72c477b07b # v6.2
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          release_branches: main
-          pre_release_branches: dev
-          dry_run: false
-          custom_tag: ${{ needs.build-multi-platform.outputs.new_tag }}
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./release-assets/
+          asset_name: release-assets-${{ needs.build-multi-platform.outputs.new_tag }}
+          asset_content_type: application/zip
 
   cleanup:
     name: Cleanup cancelled workflow
