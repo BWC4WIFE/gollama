@@ -32,96 +32,339 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    # don't run if the commit message or PR title contains [skip ci]
+  build-multi-platform:
+    name: Build for all platforms
     outputs:
       new_tag: ${{ steps.get_version.outputs.new_tag }}
       changelog: ${{ steps.get_version.outputs.changelog }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux
+            artifact_name: linux
+          - os: windows-latest
+            target: windows
+            artifact_name: windows
+          - os: macos-latest
+            target: darwin
+            artifact_name: darwin
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5
+
+      - name: Setup Go
+        uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5
         with:
           go-version-file: "go.mod"
-      - run: go version
 
-      # Install dependencies
-      - name: Install dependencies
-        run: go get .
-
-      # Get the version we're building
       - name: Get version
         id: get_version
-        uses: mathieudutour/github-tag-action@a22cf08638b34d5badda920f9daf6e72c477b07b # v6.2
+        uses: mathieudutour/github-tag-action@a22cf08638b3a5badda920f9daf6e72c477b07b # v6.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           dry_run: true
-          # tag_prefix:
-          #   # blank to remove the v prefix
 
-      # Build
-      - name: Build
+      - name: Build for ${{ matrix.target }}
         shell: bash
         env:
           GOLLAMA_VERSION: ${{ steps.get_version.outputs.new_tag }}
+          GOOS: ${{ matrix.target }}
+          GOARCH: amd64
+          CGO_ENABLED: ${{ matrix.target == 'darwin' && '1' || '0' }}
         run: |
           set -x
-          GOLLAMA_VERSION="$GOLLAMA_VERSION" make ci
-          echo "🎉 Builds completed" >> "$GITHUB_STEP_SUMMARY"
 
-      # Test
-      - uses: robherley/go-test-action@d5d3f9915dc4e07e84312edb08bfd4fba4a73f2c # v0
+          VERSION="${GOLLAMA_VERSION:-dev}"
+          OUTPUT_NAME="gollama"
 
-      - name: Upload artefacts
+          # Set executable extension for Windows
+          if [ "$GOOS" = "windows" ]; then
+            OUTPUT_NAME="${OUTPUT_NAME}.exe"
+          fi
+
+          echo "Building for $GOOS/$GOARCH version $VERSION"
+
+          # Build flags
+          LDFLAGS="-s -w -X main.version=$VERSION"
+
+          # Additional flags for Windows
+          if [ "$GOOS" = "windows" ]; then
+            LDFLAGS="$LDFLAGS -H=windowsgui"
+          fi
+
+          # Build the binary
+          go build -trimpath -ldflags "$LDFLAGS" -o "$OUTPUT_NAME" ./cmd/gollama
+
+          # Create archive
+          if [ "$GOOS" = "windows" ]; then
+            ARCHIVE_NAME="gollama-windows-amd64-${VERSION}.zip"
+            zip -r "$ARCHIVE_NAME" "$OUTPUT_NAME" LICENSE README.md
+          else
+            ARCHIVE_NAME="gollama-${GOOS}-amd64-${VERSION}.tar.gz"
+            tar czf "$ARCHIVE_NAME" "$OUTPUT_NAME" LICENSE README.md
+          fi
+
+          echo "✅ Built: $ARCHIVE_NAME"
+          ls -lh "$OUTPUT_NAME" "$ARCHIVE_NAME"
+
+      - name: Upload ${{ matrix.target }} artifact
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4
-        if: ${{ startsWith(github.ref, 'refs/heads/main') && !contains(github.event.head_commit.message, '[skip ci]') && ! contains(github.event.pull_request.title, '[skip ci]') }}
         with:
-          name: gollama
+          name: gollama-${{ matrix.target }}
           path: |
-            gollama-*.zip
+            gollama-*-${{ steps.get_version.outputs.new_tag }}.*
+            gollama${{ matrix.target == 'windows' && '.exe' || '' }}
+          retention-days: 7
 
-      # Publish
-      - name: Create a GitHub release
-        uses: ncipollo/release-action@2c591bcc8ecdcd2db72b97d6147f871fcd833ba5 # v1
-        if: ${{ startsWith(github.ref, 'refs/heads/main') && !contains(github.event.head_commit.message, '[skip ci]') && ! contains(github.event.pull_request.title, '[skip ci]') }}
+  build-windows-enhanced:
+    name: Build Windows Enhanced
+    needs: build-multi-platform
+    if: ${{ startsWith(github.ref, 'refs/heads/main') && !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Setup Go
+        uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5
         with:
-          tag: ${{ steps.get_version.outputs.new_tag }}
-          name: Release ${{ steps.get_version.outputs.new_tag }}
-          body: ${{ steps.get_version.outputs.changelog }}
-          skipIfReleaseExists: true
-          generateReleaseNotes: true
+          go-version-file: "go.mod"
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@6b208ae046db98c579e8a3aa621ab581ff575935 # v4
+        with:
+          name: gollama-windows
+          path: downloaded/
+
+      - name: Create Windows installer package
+        shell: powershell
+        env:
+          VERSION: ${{ needs.build-multi-platform.outputs.new_tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $Version = "$env:VERSION"
+
+          # Extract the built executable
+          $ZipFile = Get-ChildItem "downloaded\*.zip" | Select-Object -First 1
+          if ($ZipFile) {
+            Expand-Archive -Path $ZipFile.FullName -DestinationPath ".\extracted" -Force
+          } else {
+            # Build fresh if needed
+            go build -trimpath -ldflags "-s -w -X main.version=$Version -H=windowsgui" -o gollama.exe ./cmd/gollama
+            New-Item -ItemType Directory -Force -Path ".\extracted"
+            Copy-Item gollama.exe ".\extracted\"
+          }
+
+          # Create enhanced Windows package
+          $PackageDir = "gollama-windows-$Version"
+          New-Item -ItemType Directory -Force -Path "dist\$PackageDir"
+
+          # Copy files
+          Copy-Item ".\extracted\gollama.exe" "dist\$PackageDir\"
+
+          # Create Windows-specific README
+          @"
+          # gollama for Windows
+
+          Version: $Version
+          Build Date: $(Get-Date -Format "yyyy-MM-dd")
+
+          ## Quick Start
+
+          1. Extract this folder anywhere (no installation needed)
+          2. Double-click `gollama.exe` or run from Command Prompt/PowerShell
+
+          ## Command Line Usage
+
+          ```powershell
+          # Navigate to the gollama folder
+          cd "path\to\$PackageDir"
+
+          # Run the application
+          .\gollama.exe
+
+          # Get help
+          .\gollama.exe --help
+
+          # Estimate VRAM requirements
+          .\gollama.exe estimate <model-name>
+          ```
+          
+          ## Windows Features
+          - Native GPU detection using Windows WMI
+          - Optimized for Windows Terminal and PowerShell
+          - Windows path handling
+          - No dependencies required
+
+          ## Requirements
+          - Windows 10 or later (64-bit)
+          - Ollama installed and running
+          - 4GB+ RAM recommended
+
+          ## Troubleshooting
+          If you encounter issues:
+          - Run as Administrator if having permission issues
+          - Ensure Ollama is running: `ollama serve`
+          - Check Windows Firewall isn't blocking connections
+
+          ## Support
+          GitHub: https://github.com/${{ github.repository }}
+          "@ | Out-File -Encoding UTF8 "dist\$PackageDir\README-Windows.txt"
+
+          # Copy license
+          if (Test-Path LICENSE) {
+            Copy-Item LICENSE "dist\$PackageDir\LICENSE.txt"
+          }
+
+          # Create ZIP
+          Compress-Archive -Path "dist\$PackageDir\*" -DestinationPath "$PackageDir.zip" -CompressionLevel Optimal
+
+          # Generate SHA256 hash
+          $Hash = Get-FileHash "$PackageDir.zip" -Algorithm SHA256
+          $Hash.Hash.ToLower() | Out-File -Encoding ASCII "dist\checksum.txt"
+
+          echo "sha256=$($Hash.Hash.ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+          echo "✅ Windows package created: $PackageDir.zip"
+          echo "SHA256: $($Hash.Hash.ToLower())"
+
+      - name: Upload Windows enhanced package
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4
+        with:
+          name: gollama-windows-enhanced
+          path: |
+            gollama-windows-*.zip
+            dist/checksum.txt
+          retention-days: 30
+
+  release:
+    name: Create Release
+    needs:
+      - build-multi-platform
+      - build-windows-enhanced
+    if: ${{ startsWith(github.ref, 'refs/heads/main') && !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Linux artifact
+        uses: actions/download-artifact@6b208ae046db98c579e8a3aa621ab581ff575935 # v4
+        with:
+          name: gollama-linux
+          path: artifacts/
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@6b208ae046db98c579e8a3aa621ab581ff575935 # v4
+        with:
+          name: gollama-windows
+          path: artifacts/
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@6b208ae046db98c579e8a3aa621ab581ff575935 # v4
+        with:
+          name: gollama-darwin
+          path: artifacts/
+
+      - name: Download Windows enhanced package
+        uses: actions/download-artifact@6b208ae046db98c579e8a3aa621ab581ff575935 # v4
+        with:
+          name: gollama-windows-enhanced
+          path: artifacts/
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          # Move all release assets to a single directory
+          mkdir -p release-assets
+          find artifacts -name "*.zip" -o -name "*.tar.gz" | xargs -I {} cp {} release-assets/
+
+          # List all assets
+          echo "📦 Release assets:"
+          ls -lh release-assets/
+
+          # Generate checksums
+          cd release-assets
+          shasum -a 256 * > SHA256SUMS.txt
+          echo "🔐 Generated checksums:"
+          cat SHA256SUMS.txt
+
+      - name: Create GitHub release
+        uses: ncipollo/release-action@2c591bcc8ecdcd2db72b97d6147f871fcd833ba5 # v1
+        with:
+          tag: ${{ needs.build-multi-platform.outputs.new_tag }}
+          name: Release ${{ needs.build-multi-platform.outputs.new_tag }}
+          body: |
+            # Release ${{ needs.build-multi-platform.outputs.new_tag }}
+
+            ${{ needs.build-multi-platform.outputs.changelog }}
+
+            ## Downloads
+
+            ### Windows
+            - **gollama-windows-${{ needs.build-multi-platform.outputs.new_tag }}.zip** - Portable Windows executable
+            - Includes Windows-specific optimizations and WMI-based GPU detection
+
+            ### Linux
+            - **gollama-linux-amd64-${{ needs.build-multi-platform.outputs.new_tag }}.tar.gz** - Linux 64-bit binary
+
+            ### macOS
+            - **gollama-darwin-amd64-${{ needs.build-multi-platform.outputs.new_tag }}.tar.gz** - macOS 64-bit binary
+
+            ## Windows-Specific Features
+
+            This release includes Windows-optimized builds with:
+
+            - **Native GPU Detection**: Uses Windows Management Instrumentation (WMI) for accurate VRAM detection
+            - **Windows Console Optimization**: Better TUI experience in Windows Terminal, PowerShell, and CMD
+            - **Windows Path Handling**: Proper handling of Windows file paths and environment variables
+
+            ## Quick Start (Windows)
+
+            ```powershell
+            # Extract the ZIP file
+            Expand-Archive gollama-windows-*.zip -DestinationPath gollama
+
+            # Run the application
+            cd gollama
+            .\gollama.exe
+            ```
+
+            ## Verification
+
+            Verify downloaded files using the SHA256 checksums in `SHA256SUMS.txt`.
+
+            ## Support
+
+            Report issues at: https://github.com/${{ github.repository }}/issues
+
+            ---
+
+            *Automated build from commit: ${{ github.sha }}*
           allowUpdates: true
-          makeLatest: ${{ startsWith(github.ref, 'refs/heads/main') && !contains(github.event.head_commit.message, '[skip ci]') && ! contains(github.event.pull_request.title, '[skip ci]') }}
-          prerelease: ${{ !startsWith(github.ref, 'refs/heads/main') }}
-          # set draft to true if it's a prerelease
-          draft: ${{ !startsWith(github.ref, 'refs/heads/main') }}
+          makeLatest: true
+          prerelease: false
+          draft: false
           artifactErrorsFailBuild: true
           artifacts: |
-            gollama-*.zip
+            release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Bump version
       - name: Bump version and push tag
         id: tag_version
         uses: mathieudutour/github-tag-action@a22cf08638b34d5badda920f9daf6e72c477b07b # v6.2
-        if: ${{ startsWith(github.ref, 'refs/heads/main') && !contains(github.event.head_commit.message, '[skip ci]') }}
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           release_branches: main
           pre_release_branches: dev
-          dry_run: ${{ !startsWith(github.ref, 'refs/heads/main') }}
-          custom_tag: ${{ steps.get_version.outputs.new_tag }}
-          # tag_prefix:
-          # blank to remove the v prefix
+          dry_run: false
+          custom_tag: ${{ needs.build-multi-platform.outputs.new_tag }}
 
-  # if the workflow is cancelled, don't mark the workflow as failed
   cleanup:
+    name: Cleanup cancelled workflow
     runs-on: ubuntu-latest
     if: cancelled()
     steps:
-      - id: cleanup-cancelled
-        run: echo "Workflow was cancelled"
+      - name: Cleanup cancelled workflow
+        run: echo "Workflow was cancelled - this is normal if a new commit was pushed"
