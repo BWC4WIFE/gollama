@@ -17,7 +17,7 @@ require (
   github.com/StackExchange/wmi v1.2.1
   golang.org/x/sys v0.13.0
 )
-)
+
 require (
 	github.com/BurntSushi/toml v1.4.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
