@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -475,7 +476,10 @@ func getEditor() string {
 		return editor
 	}
 
-	// Final fallback to vim
+	// Final fallback
+	if runtime.GOOS == "windows" {
+		return "notepad"
+	}
 	return "vim"
 }
 
@@ -561,8 +565,14 @@ func startExternalEditor(client *api.Client, modelName string) (string, error) {
 			// For other commands with spaces, quote the whole thing
 			fullCommand = fmt.Sprintf(`"%s" "%s"`, editor, newModelfilePath)
 		}
-		cmd = exec.Command("sh", "-c", fullCommand)
-		logging.DebugLogger.Printf("Using shell execution with command: sh -c '%s'", fullCommand)
+		
+		if runtime.GOOS == "windows" {
+			cmd = exec.Command("cmd", "/C", fullCommand)
+			logging.DebugLogger.Printf("Using cmd /C execution with command: %s", fullCommand)
+		} else {
+			cmd = exec.Command("sh", "-c", fullCommand)
+			logging.DebugLogger.Printf("Using shell execution with command: sh -c '%s'", fullCommand)
+		}
 	} else {
 		// Simple command without spaces
 		cmd = exec.Command(editor, newModelfilePath)
