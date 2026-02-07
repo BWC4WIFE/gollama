@@ -11,9 +11,7 @@ permissions:
   statuses: write
   issues: write
 
-concurrency:
-  group: build-${{ github.ref }}-${{ github.sha }}
-  cancel-in-progress: true
+
 
 jobs:
   build-multi-platform:
