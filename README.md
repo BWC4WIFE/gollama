@@ -397,6 +397,13 @@ Please fork the repository and create a pull request with your changes.
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/BWC4WIFE">
+                    <img src="https://avatars.githubusercontent.com/u/114278909?v=4" width="50;" alt="BWC4WIFE"/>
+                    <br />
+                    <sub><b>BWC4WIFE</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/Camsbury">
                     <img src="https://avatars.githubusercontent.com/u/7485022?v=4" width="50;" alt="Camsbury"/>
                     <br />
@@ -424,6 +431,8 @@ Please fork the repository and create a pull request with your changes.
                     <sub><b>Denis Balan</b></sub>
                 </a>
             </td>
+		</tr>
+		<tr>
             <td align="center">
                 <a href="https://github.com/erg">
                     <img src="https://avatars.githubusercontent.com/u/27430?v=4" width="50;" alt="erg"/>
@@ -431,8 +440,6 @@ Please fork the repository and create a pull request with your changes.
                     <sub><b>Doug Coleman</b></sub>
                 </a>
             </td>
-		</tr>
-		<tr>
             <td align="center">
                 <a href="https://github.com/Impact123">
                     <img src="https://avatars.githubusercontent.com/u/899193?v=4" width="50;" alt="Impact123"/>
@@ -468,6 +475,8 @@ Please fork the repository and create a pull request with your changes.
                     <sub><b>SouthWolf</b></sub>
                 </a>
             </td>
+		</tr>
+		<tr>
             <td align="center">
                 <a href="https://github.com/Vigilans">
                     <img src="https://avatars.githubusercontent.com/u/20227484?v=4" width="50;" alt="Vigilans"/>
@@ -475,8 +484,6 @@ Please fork the repository and create a pull request with your changes.
                     <sub><b>Vigilans</b></sub>
                 </a>
             </td>
-		</tr>
-		<tr>
             <td align="center">
                 <a href="https://github.com/agustif">
                     <img src="https://avatars.githubusercontent.com/u/6601142?v=4" width="50;" alt="agustif"/>
