@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -40,15 +39,9 @@ var defaultConfig = Config{
 	DockerContainer: "",
 }
 
-// GetOllamaModelDir returns the default Ollama models directory for the current OS
+// GetOllamaModelDir returns the default Ollama models directory for Windows
 func GetOllamaModelDir() string {
 	homeDir := utils.GetHomeDir()
-	if runtime.GOOS == "darwin" {
-		return filepath.Join(homeDir, ".ollama", "models")
-	} else if runtime.GOOS == "linux" {
-		return "/usr/share/ollama/models"
-	}
-	// Add Windows path if needed
 	return filepath.Join(homeDir, ".ollama", "models")
 }
 
@@ -73,6 +66,7 @@ func CreateDefaultConfig() error {
 	viper.SetDefault("columns", defaultConfig.Columns)
 	viper.SetDefault("ollama_api_key", defaultConfig.OllamaAPIKey)
 	viper.SetDefault("ollama_api_url", defaultConfig.OllamaAPIURL)
+	viper.SetDefault("ollama_models_dir", defaultConfig.OllamaModelsDir)
 	viper.SetDefault("log_level", defaultConfig.LogLevel)
 	viper.SetDefault("log_file_path", defaultConfig.LogFilePath)
 	viper.SetDefault("sort_order", defaultConfig.SortOrder)
@@ -111,7 +105,7 @@ func LoadConfig() (Config, error) {
 				if err := CreateDefaultConfig(); err != nil {
 					return Config{}, fmt.Errorf("failed to recreate default config: %w", err)
 				}
-				fmt.Println("Your config file is borked!\nConfig recreated with default values, your old one has been backed up to", backupPath)
+				fmt.Println("Your config file is corrupted!\nConfig recreated with default values, your old one has been backed up to", backupPath)
 				fmt.Println("Press enter to continue...")
 				fmt.Scanln()
 			}
